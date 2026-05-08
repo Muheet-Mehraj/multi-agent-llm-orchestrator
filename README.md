@@ -1,4 +1,4 @@
-# Mega AI — Multi-Agent LLM Orchestration System
+# Multi-Agent LLM Orchestration System
 
 A production-grade multi-agent system featuring a self-improving evaluation loop, dynamic tool orchestration, adversarial robustness testing, and full streaming observability.
 
