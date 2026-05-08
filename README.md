@@ -14,19 +14,23 @@ A production-grade multi-agent system featuring a self-improving evaluation loop
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/mega-ai.git
-cd mega-ai
+git clone https://github.com/Muheet-Mehraj/multi-agent-llm-orchestrator.git
+
+cd multi-agent-llm-orchestrator
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env and set ANTHROPIC_API_KEY=your_key_here
+
+# Edit .env and set:
+# ANTHROPIC_API_KEY=your_key_here
 
 # 3. Start all services
 docker compose up --build
 
-# 4. Verify health
+# 4. Verify API health
 curl http://localhost:8000/health
 ```
+
 
 All 5 endpoints are now live. No manual DB migrations, no extra steps.
 
@@ -136,7 +140,7 @@ See `docs/architecture.txt` for the full ASCII diagram.
 |------|---------|---------------|
 | `web_search` | Keyword search against curated corpus | `timeout`, `empty`, `malformed` |
 | `code_execute` | Python sandbox (subprocess) | `timeout`, `malformed`, `error` |
-| `data_lookup` | NL→SQL against in-memory tables | `empty`, `malformed` |
+| `data_lookup` | Structured data lookup against in-memory tables | `empty`, `malformed` |
 | `self_reflect` | Contradiction detection in session outputs | `empty`, `malformed` |
 
 Each tool supports up to 2 retries, each logged separately. Fallback strategy depends on failure mode (in code, not in prompts):
@@ -257,7 +261,7 @@ Each agent declares its maximum token budget before execution. The `ContextBudge
 
 ## AI Collaboration Disclosure
 
-This project was built with Claude (Anthropic) as an AI collaborator.
+This project was developed with AI-assisted tooling support.
 
 **AI-assisted components:**
 - Initial scaffolding of the multi-agent class hierarchy
@@ -272,29 +276,50 @@ This project was built with Claude (Anthropic) as an AI collaborator.
 - Budget enforcement policy (violations logged, not silent truncation)
 - Self-improving loop approval flow design
 
-All AI-generated code was reviewed, debugged, and validated with the 33-test suite before commit.
+All AI-generated code was reviewed, debugged, and validated with the 49-test suite before commit.
 
 ---
 
 ## Running Tests
 
-```bash
-# Inside the container
-docker compose exec api pytest tests/ -v
+### Inside Docker
 
-# Or locally with deps installed
-ANTHROPIC_API_KEY=test DATABASE_URL=postgresql+asyncpg://test:test@localhost:5432/test \
-  pytest tests/ -v
+```bash
+docker compose exec api pytest tests/ -v
 ```
 
-Output: 33 tests covering tools, context budget, scoring logic, dependency graph, and token counting.
+### Locally
+
+```bash
+ANTHROPIC_API_KEY=test \
+DATABASE_URL=postgresql+asyncpg://test:test@localhost:5432/test \
+pytest tests/ -v
+```
+
+Current test suite status:
+
+```text
+49 passed
+```
+
+Coverage includes:
+- orchestration utilities
+- tool failure contracts and retries
+- context budget enforcement
+- dependency graph validation
+- evaluation scoring logic
+- adversarial handling
+- SSE formatting
+- prompt versioning
+- provenance validation
+- token counting and compression
 
 ---
 
 ## Project Structure
 
 ```
-mega-ai/
+multi-agent-llm-orchestrator/
 ├── app/
 │   ├── agents/
 │   │   ├── base.py              # BaseAgent with budget enforcement + LLM call
@@ -318,7 +343,8 @@ mega-ai/
 │   ├── config.py                # Pydantic settings
 │   └── main.py                  # FastAPI app (5 endpoints)
 ├── tests/
-│   └── test_suite.py            # 33 unit + integration tests
+│   ├── test_suite.py            # Core unit + integration tests
+│   └── test_extended.py         # Extended architecture + eval tests
 ├── docs/
 │   └── architecture.txt         # ASCII architecture diagram
 ├── docker-compose.yml
