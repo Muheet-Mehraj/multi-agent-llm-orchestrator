@@ -10,11 +10,10 @@ import json
 import re
 import tempfile
 import os
+import sys
 from typing import Optional, Any
 from dataclasses import dataclass, field, asdict
-
 from app.config import settings
-
 
 @dataclass
 class ToolResult:
@@ -164,6 +163,7 @@ async def code_execute(code: str, timeout: int = 10) -> ToolResult:
     """
     Execute Python code in a sandbox subprocess.
     Returns stdout, stderr, exit_code.
+
     Failure contract:
     - timeout: subprocess killed after `timeout` seconds
     - malformed: non-string or empty code
@@ -180,8 +180,18 @@ async def code_execute(code: str, timeout: int = 10) -> ToolResult:
             latency_ms=(time.time() - start) * 1000,
         )
 
-    # Security: block dangerous imports
-    dangerous = ["os.system", "subprocess", "shutil.rmtree", "__import__('os')", "eval(", "exec("]
+    # Security: block dangerous patterns
+    dangerous = [
+        "os.system",
+        "subprocess",
+        "shutil.rmtree",
+        "__import__('os')",
+        'os.remove',
+        'os.rmdir',
+        'eval(',
+        'exec(',
+    ]
+
     for d in dangerous:
         if d in code:
             return ToolResult(
@@ -192,32 +202,45 @@ async def code_execute(code: str, timeout: int = 10) -> ToolResult:
                 latency_ms=(time.time() - start) * 1000,
             )
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+    # Create temporary file
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".py",
+        delete=False,
+        encoding="utf-8",
+    ) as f:
         f.write(code)
         fname = f.name
 
     try:
-        loop = asyncio.get_event_loop()
+        # Use the currently active Python interpreter
         proc = await asyncio.wait_for(
             asyncio.create_subprocess_exec(
-                "python3", fname,
+                sys.executable,
+                fname,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             ),
             timeout=timeout,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=timeout,
+        )
+
         exit_code = proc.returncode
 
         return ToolResult(
             success=True,
             data={
-                "stdout": stdout.decode()[:2000],
-                "stderr": stderr.decode()[:500],
+                "stdout": stdout.decode("utf-8", errors="replace")[:2000],
+                "stderr": stderr.decode("utf-8", errors="replace")[:500],
                 "exit_code": exit_code,
             },
             latency_ms=(time.time() - start) * 1000,
         )
+
     except asyncio.TimeoutError:
         return ToolResult(
             success=False,
@@ -226,6 +249,7 @@ async def code_execute(code: str, timeout: int = 10) -> ToolResult:
             error_message=f"Code execution timed out after {timeout}s",
             latency_ms=(time.time() - start) * 1000,
         )
+
     except Exception as e:
         return ToolResult(
             success=False,
@@ -234,13 +258,12 @@ async def code_execute(code: str, timeout: int = 10) -> ToolResult:
             error_message=str(e),
             latency_ms=(time.time() - start) * 1000,
         )
+
     finally:
         try:
             os.unlink(fname)
         except Exception:
             pass
-
-
 # ============================================================
 # TOOL 3: Structured Data Lookup (NL→SQL)
 # ============================================================
