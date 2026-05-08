@@ -18,6 +18,7 @@ from app.database import (
     PromptRewrite, PromptRewriteStatus, ToolCallLog, AsyncSessionLocal
 )
 from app.streaming.sse import stream_pipeline, sse_job_end
+from app.agents.orchestrator import run_job
 
 
 router = APIRouter()
@@ -63,7 +64,6 @@ async def submit_query(request: QueryRequest, background_tasks: BackgroundTasks,
             await queue.put({"agent": agent_id, "token": token})
 
         async def run():
-            from app.agents.orchestrator import run_job
             try:
                 await run_job(job_id, request.query, stream_callback=stream_callback)
             except Exception as e:
@@ -89,15 +89,18 @@ async def submit_query(request: QueryRequest, background_tasks: BackgroundTasks,
             headers={"X-Job-ID": job_id, "Cache-Control": "no-cache"},
         )
 
-    # Non-streaming: background job
-    async def run_bg():
-        from app.agents.orchestrator import run_job
+    # Non-streaming: launch async job directly on the event loop,
+    # independent of request lifecycle.
+    async def debug_run():
         try:
             await run_job(job_id, request.query)
-        except Exception:
-            pass
+        except Exception as e:
+            import traceback
+            print("\n===== RUN_JOB ERROR =====")
+            traceback.print_exc()
+            print("=========================\n")
 
-    background_tasks.add_task(run_bg)
+    asyncio.create_task(debug_run())
     return {"job_id": job_id, "status": "pending"}
 
 

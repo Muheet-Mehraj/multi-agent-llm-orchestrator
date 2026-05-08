@@ -68,6 +68,12 @@ class OrchestratorAgent(BaseAgent):
             "synthesis_agent": SynthesisAgent(logger),
         }
 
+    async def run(self, *args, **kwargs):
+        """
+          Compatibility wrapper required by BaseAgent abstract interface.
+        """
+        return await self.orchestrate(*args, **kwargs)
+    
     async def route(self, context: SharedContext) -> list[dict]:
         """Decide routing plan dynamically based on query analysis."""
         messages = [

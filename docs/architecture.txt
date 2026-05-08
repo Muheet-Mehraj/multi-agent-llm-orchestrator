@@ -1,20 +1,20 @@
 
-MEGA AI — Multi-Agent LLM Orchestration System
+Multi-Agent LLM Orchestration System
 Architecture Diagram
 ═══════════════════════════════════════════════════════════════════════════════
 
                               ┌─────────────────────┐
-                              │    CLIENT / USER     │
+                              │    CLIENT / USER    │
                               └──────────┬──────────┘
                                          │ POST /query (SSE stream)
                                          ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                          FASTAPI API SERVER                                │
-│  ┌─────────────┐  ┌───────────────┐  ┌──────────────┐  ┌───────────────┐ │
-│  │POST /query  │  │GET /jobs/{id} │  │GET /eval/    │  │POST /eval/    │ │
-│  │   (SSE)     │  │   /trace      │  │   latest     │  │rewrites/{id}/ │ │
-│  └──────┬──────┘  └───────────────┘  └──────────────┘  │   review      │ │
-│         │                                                └───────────────┘ │
+│  ┌─────────────┐  ┌───────────────┐  ┌──────────────┐  ┌───────────────┐   │
+│  │POST /query  │  │GET /jobs/{id} │  │GET /eval/    │  │POST /eval/    │   │ 
+│  │   (SSE)     │  │   /trace      │  │   latest     │  │rewrites/{id}/ │   │
+│  └──────┬──────┘  └───────────────┘  └──────────────┘  │   review      │   │
+│         │                                              └───────────────┘   │
 └─────────┼──────────────────────────────────────────────────────────────────┘
           │ asyncio task
           ▼
@@ -26,12 +26,12 @@ Architecture Diagram
 │  3. Mediates ALL inter-agent handoffs (agents never call each other)        │
 │  4. Logs every decision with justification                                  │
 │                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    SHARED CONTEXT OBJECT                            │   │
-│  │  job_id │ original_query │ routing_plan │ sub_tasks                │   │
-│  │  retrieved_chunks │ claims │ flagged_spans │ provenance_map         │   │
-│  │  tool_call_history │ budgets │ policy_violations │ errors           │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    SHARED CONTEXT OBJECT                            │    │
+│  │  job_id │ original_query │ routing_plan │ sub_tasks                 │    │
+│  │  retrieved_chunks │ claims │ flagged_spans │ provenance_map         │    │
+│  │  tool_call_history │ budgets │ policy_violations │ errors           │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 └──────────────────────────────┬──────────────────────────────────────────────┘
                                │ orchestrator dispatches to sub-agents
           ┌────────────────────┼───────────────────────┐
@@ -42,8 +42,8 @@ Architecture Diagram
 │                 │  │                 │  │                │  │                  │
 │ Breaks query    │  │ Multi-hop       │  │ Per-claim      │  │ Merges all       │
 │ into typed      │  │ retrieval:      │  │ confidence     │  │ outputs          │
-│ sub-tasks with  │  │ hop1 → broad   │  │ scores         │  │                  │
-│ explicit        │  │ hop2 → refined │  │ Flags specific │  │ Resolves         │
+│ sub-tasks with  │  │ hop1 → broad    │  │ scores         │  │                  │
+│ explicit        │  │ hop2 → refined  │  │ Flags specific │  │ Resolves         │
 │ dependency      │  │                 │  │ text spans     │  │ contradictions   │
 │ graph           │  │ Cites chunk_id  │  │ (NOT overall)  │  │                  │
 │                 │  │ per statement   │  │                │  │ Provenance map:  │
@@ -132,7 +132,7 @@ Architecture Diagram
 │  3. Maps dimension → responsible agent                                      │
 │  4. Proposes rewritten prompt with unified diff + justification             │
 │  5. Stores proposed rewrite (NEVER auto-applies)                            │
-│  6. Human reviews: POST /eval/rewrites/{id}/review                         │
+│  6. Human reviews: POST /eval/rewrites/{id}/review                          │
 │  7. If approved: re-runs eval on ONLY previously failed cases               │
 │  8. Logs performance delta (before/after avg score)                         │
 │  All steps timestamped and queryable                                        │
@@ -142,10 +142,10 @@ Architecture Diagram
 │                    OBSERVABILITY & LOGGING                                  │
 │                                                                             │
 │  Structured log schema per event:                                           │
-│  { timestamp, agent_id, event_type, input_hash, output_hash,               │
+│  { timestamp, agent_id, event_type, input_hash, output_hash,                │
 │    latency_ms, token_count, policy_violation }                              │
 │                                                                             │
-│  Event types: job_start, agent_start, agent_end, tool_call, tool_result,   │
+│  Event types: job_start, agent_start, agent_end, tool_call, tool_result,    │
 │               tool_retry, handoff, context_compress, budget_violation,      │
 │               token_stream, job_end, error                                  │
 │                                                                             │
@@ -157,9 +157,9 @@ Architecture Diagram
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         DOCKER SERVICES                                     │
 │                                                                             │
-│  api      (port 8000)  FastAPI server + SSE streaming                      │
+│  api      (port 8000)  FastAPI server + SSE streaming                       │
 │  worker   (background) Redis-queue async job processor                      │
-│  db       (port 5432)  PostgreSQL — all state, logs, evals                 │
+│  db       (port 5432)  PostgreSQL — all state, logs, evals                  │
 │  redis    (port 6379)  Job queue                                            │
 │  logui    (port 8080)  Datasette log query interface                        │
 │                                                                             │
