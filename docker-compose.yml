@@ -1,0 +1,85 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-megaai}
+      POSTGRES_USER: ${POSTGRES_USER:-megaai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-megaai_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-megaai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-megaai}:${POSTGRES_PASSWORD:-megaai_secret}@db:5432/${POSTGRES_DB:-megaai}
+      - REDIS_URL=redis://redis:6379
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.worker.main
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-megaai}:${POSTGRES_PASSWORD:-megaai_secret}@db:5432/${POSTGRES_DB:-megaai}
+      - REDIS_URL=redis://redis:6379
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+
+  logui:
+    build:
+      context: .
+      dockerfile: Dockerfile.logui
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-megaai}:${POSTGRES_PASSWORD:-megaai_secret}@db:5432/${POSTGRES_DB:-megaai}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
