@@ -23,6 +23,7 @@ class ToolResult:
     failure_mode: Optional[str] = None  # "timeout" | "empty" | "malformed" | "error"
     error_message: Optional[str] = None
     latency_ms: float = 0.0
+    agent_accepted: Optional[bool] = None  # Set by agent AFTER evaluating the result
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -455,10 +456,12 @@ async def call_tool_with_retry(
             error_message=f"Unknown tool: {tool_name}",
         ), 0
 
+    last_log_id = None
+
     for attempt in range(1, max_retries + 2):  # +2 for initial + retries
         result = await tool_fn(**tool_input)
 
-        # Log this attempt
+        # Log this attempt (agent_accepted will be updated after agent evaluates result)
         async with AsyncSessionLocal() as session:
             log = ToolCallLog(
                 job_id=job_id,
@@ -470,26 +473,38 @@ async def call_tool_with_retry(
                 latency_ms=result.latency_ms,
                 success=result.success,
                 failure_mode=result.failure_mode,
+                agent_accepted=None,  # Set by agent after evaluation
             )
             session.add(log)
             await session.commit()
+            await session.refresh(log)
+            last_log_id = log.id
+            # Attach log_id to result so caller can update agent_accepted
+            result._log_id = last_log_id
 
         if result.success:
             return result, attempt
 
         if attempt <= max_retries:
-            # Modify input on retry based on failure mode
             if result.failure_mode == "empty":
-                # Broaden the query
                 if "query" in tool_input:
                     words = tool_input["query"].split()
                     tool_input = {**tool_input, "query": " ".join(words[:max(1, len(words)//2)])}
             elif result.failure_mode == "timeout":
-                # Simplify input
                 if "query" in tool_input:
                     tool_input = {**tool_input, "query": tool_input["query"][:100]}
-            # malformed - don't retry
             else:
+                # malformed - no retry
                 return result, attempt
 
     return result, max_retries + 1
+
+
+async def update_tool_accepted(log_id: str, accepted: bool):
+    """Call after agent evaluates tool result to log whether it accepted or rejected it."""
+    from app.database import AsyncSessionLocal, ToolCallLog
+    async with AsyncSessionLocal() as session:
+        log = await session.get(ToolCallLog, log_id)
+        if log:
+            log.agent_accepted = accepted
+            await session.commit()

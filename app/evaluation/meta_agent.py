@@ -275,8 +275,17 @@ async def approve_rewrite(rewrite_id: str, approved: bool, reviewer_note: Option
     if not approved:
         return {"status": "rejected", "rewrite_id": rewrite_id}
 
-    # Apply the prompt (update in-memory - in production this would write to DB)
+    # Apply prompt: update in-memory dict AND write to prompts/active/ file
     CURRENT_PROMPTS[agent_id] = proposed
+    try:
+        from app.core.prompts import promote_prompt, save_proposed_prompt
+        # First save to proposed/ for audit trail
+        save_proposed_prompt(agent_id, proposed, rewrite_id)
+        # Then promote to active/ (archives old version to history/)
+        new_path = promote_prompt(agent_id, proposed)
+    except Exception as e:
+        # File I/O failure doesn't block the approval flow
+        pass
 
     # Get failed test case IDs from original run
     async with AsyncSessionLocal() as session:

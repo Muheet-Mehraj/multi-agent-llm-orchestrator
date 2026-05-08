@@ -156,8 +156,11 @@ async def test_tool_retry_on_empty(monkeypatch):
 
     # Mock the DB session so we don't need a real DB
     class FakeSession:
-        def add(self, obj): pass
+        def add(self, obj): 
+            obj.id = "fake_log_id"
         async def commit(self): pass
+        async def refresh(self, obj): 
+            obj.id = "fake_log_id"
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
 

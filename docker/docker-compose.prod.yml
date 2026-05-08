@@ -1,0 +1,36 @@
+# docker/docker-compose.prod.yml
+# Production overrides. Use with:
+#   docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml up
+version: "3.9"
+
+services:
+  api:
+    restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=WARNING
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  db:
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  redis:
+    restart: always
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  logui:
+    restart: always

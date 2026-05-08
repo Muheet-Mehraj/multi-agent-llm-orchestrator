@@ -90,7 +90,17 @@ def error_response(code: str, msg: str, job_id: Optional[str] = None, status_cod
 # ============================================================
 
 async def _sse_job_stream(job_id: str, query: str) -> AsyncIterator[str]:
-    """Stream agent activity token by token via SSE."""
+    """Stream agent activity token by token via SSE.
+    
+    Events emitted:
+    - job_start: initial event with job_id
+    - token: each streamed LLM token with agent_id
+    - tool_call: tool invocation with name, budget_remaining
+    - tool_result: tool outcome with success, latency, accepted
+    - budget_update: context budget remaining per agent
+    - heartbeat: keep-alive
+    - job_end: final answer + status
+    """
     from app.agents.orchestrator import run_job
     from app.database import AsyncSessionLocal
 
@@ -98,18 +108,21 @@ async def _sse_job_stream(job_id: str, query: str) -> AsyncIterator[str]:
     done = asyncio.Event()
 
     async def stream_callback(agent_id: str, token: str):
-        # Read current budget info
-        await queue.put({
-            "event": "token",
-            "agent": agent_id,
-            "token": token,
-        })
-
-    async def send_tool_event(event_data: dict):
-        await queue.put({"event": "tool_call", **event_data})
+        """Called by agents on every streamed token and tool event."""
+        # Detect tool event markers embedded in the stream
+        if token.startswith("\n[TOOL_CALL:") or token.startswith("[TOOL_CALL:"):
+            await queue.put({"event": "tool_call", "agent": agent_id, "detail": token.strip()})
+        elif token.startswith("\n[TOOL_RESULT:") or token.startswith("[TOOL_RESULT:"):
+            await queue.put({"event": "tool_result", "agent": agent_id, "detail": token.strip()})
+        else:
+            await queue.put({
+                "event": "token",
+                "agent": agent_id,
+                "token": token,
+            })
 
     # Yield initial job_id event
-    yield f"data: {json.dumps({'event': 'job_start', 'job_id': job_id})}\n\n"
+    yield f"data: {json.dumps({'event': 'job_start', 'job_id': job_id, 'query': query[:100]})}\n\n"
 
     # Run job in background task
     async def run():
@@ -128,7 +141,6 @@ async def _sse_job_stream(job_id: str, query: str) -> AsyncIterator[str]:
             event = await asyncio.wait_for(queue.get(), timeout=0.5)
             yield f"data: {json.dumps(event)}\n\n"
         except asyncio.TimeoutError:
-            # Heartbeat to keep connection alive
             yield f"data: {json.dumps({'event': 'heartbeat'})}\n\n"
 
     # Final state

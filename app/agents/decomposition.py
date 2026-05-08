@@ -7,9 +7,11 @@ import json
 import re
 from app.agents.base import BaseAgent
 from app.core.context import SharedContext, SubTask
+from app.core.prompts import load_prompt
 from app.database import EventType
 
 
+_DECOMP_FALLBACK = "decomposition_agent"
 DECOMPOSITION_SYSTEM = """You are a Decomposition Agent. Your role is to break down complex queries into structured sub-tasks with explicit dependencies.
 
 For each query, output a JSON object with this exact schema:

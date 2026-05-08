@@ -8,6 +8,7 @@ import json
 import re
 from app.agents.base import BaseAgent
 from app.core.context import SharedContext, ProvenanceEntry, AgentOutput
+from app.core.prompts import load_prompt
 from app.database import EventType
 
 

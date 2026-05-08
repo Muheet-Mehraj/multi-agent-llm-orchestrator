@@ -1,8 +1,10 @@
 """
 Critique Agent
 Reviews output of every other agent.
-Assigns structured confidence score PER CLAIM (not overall).
+Assigns structured confidence score PER CLAIM (not overall output).
 Flags specific spans of text it disagrees with.
+Sets agent_accepted on self_reflect tool output.
+Emits tool-in-flight + budget-remaining to SSE stream.
 """
 import json
 import re
@@ -17,8 +19,7 @@ CRITIQUE_SYSTEM = """You are a Critique Agent. Your job is to critically review 
 You MUST:
 1. Assign confidence scores PER CLAIM (not overall)
 2. Flag SPECIFIC SPANS of text you disagree with, not whole outputs
-3. Use the self_reflect tool to check for internal contradictions
-4. Be precise about what exactly you disagree with and why
+3. Be precise about what exactly you disagree with and why
 
 Output format (JSON):
 {
@@ -36,7 +37,7 @@ Output format (JSON):
     {
       "span": "exact text excerpt",
       "source_agent": "agent_id",
-      "issue": "What's wrong with this span",
+      "issue": "What is wrong with this span",
       "severity": "high|medium|low"
     }
   ],
@@ -44,9 +45,13 @@ Output format (JSON):
   "contradiction_check": "Results from self-reflection"
 }
 
-Be rigorous. If you're not sure about something, flag it as uncertain.
-Output ONLY valid JSON.
+Be rigorous. Flag uncertain items explicitly. Output ONLY valid JSON.
 """
+
+
+async def _emit(stream_callback, agent_id: str, msg: str):
+    if stream_callback:
+        await stream_callback(agent_id, msg)
 
 
 class CritiqueAgent(BaseAgent):
@@ -56,6 +61,10 @@ class CritiqueAgent(BaseAgent):
     async def run(self, context: SharedContext, stream_callback=None) -> SharedContext:
         await self.declare_budget(context)
 
+        def _remaining():
+            b = context.get_budget(self.agent_id)
+            return b.remaining() if b else "?"
+
         # Self-reflection: check for contradictions in previous outputs
         context_snapshot = {
             "agent_outputs": {
@@ -64,7 +73,10 @@ class CritiqueAgent(BaseAgent):
             }
         }
 
-        reflect_result, reflect_attempts = await call_tool_with_retry(
+        await _emit(stream_callback, self.agent_id,
+                    f"[TOOL_CALL:self_reflect focus=contradictions budget_remaining={_remaining()}]\n")
+
+        reflect_result, _ = await call_tool_with_retry(
             tool_name="self_reflect",
             tool_input={"context_snapshot": context_snapshot, "focus": "contradictions"},
             job_id=context.job_id,
@@ -72,37 +84,38 @@ class CritiqueAgent(BaseAgent):
             max_retries=1,
         )
 
+        # Agent decides whether self-reflect output is sufficient
         reflection_text = ""
         if reflect_result.success and reflect_result.data:
+            reflect_result.agent_accepted = True
             reflection_text = reflect_result.data.get("reflection_summary", "")
+        else:
+            reflect_result.agent_accepted = False  # Rejected: empty or failed
 
-        # Build critique input from all agent outputs
-        outputs_text = []
-        for agent_id, output in context.agent_outputs.items():
-            content_str = str(output.content)[:800]
-            outputs_text.append(f"[{agent_id}]:\n{content_str}")
+        await _emit(stream_callback, self.agent_id,
+                    f"[TOOL_RESULT:self_reflect success={reflect_result.success} "
+                    f"accepted={reflect_result.agent_accepted} "
+                    f"contradictions={reflect_result.data.get('total_contradictions', 0) if reflect_result.data else 'n/a'} "
+                    f"budget_remaining={_remaining()}]\n")
 
-        all_outputs = "\n\n---\n\n".join(outputs_text)
-        if not all_outputs:
-            all_outputs = "No agent outputs available yet."
+        # Build critique input
+        outputs_text = "\n\n---\n\n".join(
+            f"[{aid}]:\n{str(out.content)[:800]}"
+            for aid, out in context.agent_outputs.items()
+        ) or "No agent outputs available yet."
 
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    f"Original Query: {context.original_query}\n\n"
-                    f"Agent Outputs to Critique:\n{all_outputs}\n\n"
-                    f"Self-Reflection Results:\n{reflection_text}\n\n"
-                    f"Critique each claim individually with confidence scores."
-                ),
-            }
-        ]
+        messages = [{
+            "role": "user",
+            "content": (
+                f"Original Query: {context.original_query}\n\n"
+                f"Agent Outputs to Critique:\n{outputs_text}\n\n"
+                f"Self-Reflection Results:\n{reflection_text or 'N/A'}\n\n"
+                "Critique each claim individually with per-claim confidence scores. "
+                "Flag specific text spans you disagree with."
+            ),
+        }]
 
-        within_budget = await self.check_budget(
-            context,
-            len(messages[0]["content"]) // 4,
-            label="critique_input"
-        )
+        await self.check_budget(context, len(messages[0]["content"]) // 4, label="critique_input")
 
         response_text, tokens = await self.call_llm(
             messages=messages,
@@ -112,7 +125,6 @@ class CritiqueAgent(BaseAgent):
             stream_callback=stream_callback,
         )
 
-        # Parse critique output
         try:
             clean = re.sub(r"```json\s*|\s*```", "", response_text).strip()
             critique_data = json.loads(clean)
@@ -124,17 +136,16 @@ class CritiqueAgent(BaseAgent):
                 "contradiction_check": reflection_text,
             }
 
-        # Populate context claims
-        claims = []
-        for c in critique_data.get("claims_reviewed", []):
-            claim = Claim(
+        claims = [
+            Claim(
                 text=c.get("text", ""),
                 confidence=float(c.get("confidence", 0.5)),
                 source_agent=c.get("source_agent", "unknown"),
                 flagged=c.get("flagged", False),
                 flag_reason=c.get("flag_reason"),
             )
-            claims.append(claim)
+            for c in critique_data.get("claims_reviewed", [])
+        ]
 
         context.claims = claims
         context.flagged_spans = critique_data.get("flagged_spans", [])
@@ -154,7 +165,8 @@ class CritiqueAgent(BaseAgent):
                 "claims_reviewed": len(claims),
                 "flagged_count": sum(1 for c in claims if c.flagged),
                 "flagged_spans": len(context.flagged_spans),
-                "reflection_used": bool(reflection_text),
+                "self_reflect_accepted": reflect_result.agent_accepted,
+                "budget_remaining": _remaining(),
             },
             output_content=response_text,
             token_count=tokens,
