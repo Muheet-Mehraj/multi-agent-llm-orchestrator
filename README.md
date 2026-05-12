@@ -112,7 +112,7 @@ Runs only the test cases that failed in the latest eval run, using latest approv
 
 ## Architecture
 
-See `docs/architecture.txt` for the full ASCII diagram.
+![Architecture](./docs/Architecture.png)
 
 ### Agent Descriptions & Decision Boundaries
 
