@@ -346,7 +346,7 @@ multi-agent-llm-orchestrator/
 │   ├── test_suite.py            # Core unit + integration tests
 │   └── test_extended.py         # Extended architecture + eval tests
 ├── docs/
-│   └── architecture.txt         # ASCII architecture diagram
+│   └── architecture.png         #  Architecture diagram
 ├── docker-compose.yml
 ├── Dockerfile
 ├── Dockerfile.logui
