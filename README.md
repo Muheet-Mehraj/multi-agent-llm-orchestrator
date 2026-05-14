@@ -112,7 +112,7 @@ Runs only the test cases that failed in the latest eval run, using latest approv
 
 ## Architecture
 
-![Architecture](./docs/Architecture.png)
+![Architecture](./docs/LLM Orchestration Architecture.png)
 
 ### Agent Descriptions & Decision Boundaries
 
